@@ -5,7 +5,10 @@ from typing import List
 from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
+from dotenv import load_dotenv
 from openai import OpenAI
+
+load_dotenv()
 
 app = FastAPI(
     title = "FitAdaptAI API",
@@ -85,3 +88,74 @@ def get_ai_client() -> OpenAI:
 def health_check():
     return {"status": "ok", "service": "FitAdaptAI API (Python/FastAPI)"}
 
+
+@app.post("/api/generate-routine", response_model = RutinaResponse)
+def generate_routine(payload: WorkoutRequest):
+    client = get_ai_client()
+    
+    system_prompt = (
+        "Eres un entrenador de fuerza y especialista en biomecánica con titulación internacional. "
+        "Tu objetivo es diseñar una sesión de entrenamiento adaptada a las restricciones indicadas. "
+        "Debes responder EXCLUSIVAMENTE con un JSON válido con la siguiente estructura exacta:\n"
+        "{\n"
+        '  "calentamiento": "descripción de 2-3 frases de movilidad y activación articular",\n'
+        '  "ejercicios": [\n'
+        '    {\n'
+        '      "nombre": "Nombre del ejercicio",\n'
+        '      "series": 3,\n'
+        '      "repeticiones": "8-10",\n'
+        '      "descanso_segundos": 90,\n'
+        '      "rpe_sugerido": "RPE 8",\n'
+        '      "consejo_tecnico": "Instrucción biomecánica clave de seguridad y ejecución"\n'
+        '    }\n'
+        '  ],\n'
+        '  "alternativa_rapida": "Sustituto rápido por si el equipamiento principal está ocupado",\n'
+        '  "tiempo_total_estimado": 45\n'
+        "}\n"
+        "No incluyas texto conversacional ni explicaciones fuera del bloque JSON."
+    )
+    
+    user_prompt = (
+        f"Genera una sesión de gimnasio con estos parámetros:\n"
+        f"- Objetivo: {payload.objetivo.value}\n"
+        f"- Tiempo total disponible: {payload.tiempo_minutos} minutos\n"
+        f"- Nivel del practicante: {payload.nivel.value}\n"
+        f"- Equipamiento disponible: {', '.join([e.value for e in payload.equipamiento])}\n\n"
+        f"Ajusta el volumen para no exceder los {payload.tiempo_minutos} minutos."
+    )
+    
+    try:
+        completion = client.chat.completions.create(
+            model = os.getenv("AI_MODEL", "openai/gpt-oss-120b"),
+            messages = [
+                {"role" : "system", "content" : system_prompt},
+                {"role" : "user", "content" : user_prompt}
+            ],
+            temperature = 0.3, 
+            max_tokens = 1000,
+        )
+        
+        raw_content = completion.choices[0].message.content.strip()
+        
+        # Intentamos parsear la respuesta como JSON
+        if raw_content.startswith("```"):
+            lines = raw_content.splitlines()
+            if lines[0].startswith("```"):
+                lines = lines[1:]
+            if lines and lines[-1].startswith("```"):
+                lines = lines[:-1]
+            raw_content = "\n".join(lines).strip()
+
+        parsed_data = json.loads(raw_content)
+        return RutinaResponse(**parsed_data)
+
+    except json.JSONDecodeError:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="La respuesta del modelo de IA no cumplió con el formato JSON requerido."
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error durante el procesamiento de la rutina: {str(exc)}"
+        )
