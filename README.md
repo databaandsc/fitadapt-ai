@@ -7,7 +7,7 @@ Aplicación web de pantalla única (SPA) enfocada en el acondicionamiento físic
 * **Práctica:** UD1 · Explotación y despliegue de una aplicación con IA
 * **Módulo:** Explotación de Servicios de Procesamiento y Analítica de Datos (ESPAD)
 * **Aplicación:** FitAdapt AI (Generador de rutinas mediante LLM)
-* **Integrantes del Grupo:**
+* **Integrantes del Grupo: Ricardo Fernández Chamorro | Carlos Madrid**
 
 ## 2. Plan de Documentación
 
@@ -40,7 +40,6 @@ pip install -r requirements.txt
 # 3. Arrancar el servidor de desarrollo
 python -m uvicorn api.index:app --reload --port 8000
 ```
-
 
 *El servicio de salud (*health check*) responderá en `http://127.0.0.1:8000/api/health`.*
 
@@ -91,9 +90,14 @@ La configuración inyectada mediante variables de entorno garantiza el confinami
 ## 11. Registro de Problemas y Soluciones
 
 * **Incidencia 1:** Conflicto de entornos virtuales locales (Conda vs Venv) al ejecutar `uvicorn`.
+
   * **Síntoma:** Error `ModuleNotFoundError: No module named 'fastapi'`.
   * **Solución:** Forzar la ejecución de Uvicorn a través del binario de Python del entorno virtual activo mediante el comando `python -m uvicorn api.index:app --reload --port 8000`.
+* **Incidencia 2:** Fallo en la generación de rutinas por retirada de modelos en el proveedor Groq.
+
+  * **Síntoma:** El servidor devuelve `HTTP 500 Internal Server Error` y el log de FastAPI muestra `Error code: 400 - The model has been decommissioned`.
+  * **Solución:** El backend manejó la excepción correctamente evitando el bloqueo. Se acudió a la consola de Groq para consultar los *Model IDs* vigentes y se actualizó la variable `AI_MODEL` en el archivo `.env` por una versión operativa (ej. `mixtral-8x7b-32768`), resolviendo la petición con éxito.
 
 ## 12. Historial de Versiones (Git y Evidencias)
 
-* `v0.1-backend`*(En curso)*: Estructura base de FastAPI, modelos Pydantic y lógica de IA.
+* `v0.1-backend`*(En curso)*: Estructura base de FastAPI, modelos Pydantic y lógica de IA completada y probada.
