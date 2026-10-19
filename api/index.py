@@ -1,14 +1,24 @@
 import os
 import json
+import logging
 from enum import Enum
-from typing import List
+from typing import List, Literal
 from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 from dotenv import load_dotenv
+import openai
 from openai import OpenAI
 
+try:
+    from .demo import generar_rutina_demo
+except ImportError:  # pragma: no cover - solo aplica si se ejecuta como módulo suelto (p. ej. Vercel)
+    # Vercel ejecuta este archivo como módulo suelto desde el directorio api/.
+    from demo import generar_rutina_demo
+
 load_dotenv()
+
+logger = logging.getLogger("fitadapt.api")
 
 app = FastAPI(
     title = "FitAdaptAI API",
@@ -62,12 +72,18 @@ class Ejercicio(BaseModel):
     consejo_tecnico: str
 
 class RutinaResponse(BaseModel):
+    modo: Literal["demo", "ia"] = Field(..., description="Origen de la rutina: catálogo local (demo) o proveedor de IA")
     calentamiento: str
     ejercicios: List[Ejercicio]
     alternativa_rapida: str
     tiempo_total_estimado: int
-    
+
 # 4. Configuración de la API de Groq
+
+def get_run_mode() -> Literal["demo", "ia"]:
+    # Si la variable no existe o tiene un valor desconocido, se opera en modo IA
+    modo = (os.getenv("FITADAPT_MODE", "ia") or "ia").strip().lower()
+    return modo if modo in ("demo", "ia") else "ia"
 
 def get_ai_client() -> OpenAI:
     # Leemos la clave de la API de Groq desde las variables de entorno
@@ -86,11 +102,18 @@ def get_ai_client() -> OpenAI:
 
 @app.get("/api/health")
 def health_check():
-    return {"status": "ok", "service": "FitAdaptAI API (Python/FastAPI)"}
+    return {"status": "ok", "service": "FitAdaptAI API (Python/FastAPI)", "modo": get_run_mode()}
 
 
 @app.post("/api/generate-routine", response_model = RutinaResponse)
 def generate_routine(payload: WorkoutRequest):
+    modo = get_run_mode()
+
+    # Modo demo: rutina local determinista, sin cliente ni red.
+    if modo == "demo":
+        rutina = generar_rutina_demo(payload)
+        return RutinaResponse(modo = "demo", **rutina)
+
     client = get_ai_client()
     
     system_prompt = (
@@ -110,9 +133,12 @@ def generate_routine(payload: WorkoutRequest):
         '    }\n'
         '  ],\n'
         '  "alternativa_rapida": "Sustituto rápido por si el equipamiento principal está ocupado",\n'
-        '  "tiempo_total_estimado": 45\n'
+        '  "tiempo_total_estimado": 30\n'
         "}\n"
-        "No incluyas texto conversacional ni explicaciones fuera del bloque JSON."
+        "No incluyas texto conversacional ni explicaciones fuera del bloque JSON.\n"
+        "El valor de tiempo_total_estimado debe ser la suma estimada en minutos de la sesión "
+        "propuesta (calentamiento, ejercicios y descansos) y NUNCA debe superar el tiempo "
+        "total disponible indicado por el usuario."
     )
     
     user_prompt = (
@@ -131,8 +157,10 @@ def generate_routine(payload: WorkoutRequest):
                 {"role" : "system", "content" : system_prompt},
                 {"role" : "user", "content" : user_prompt}
             ],
-            temperature = 0.3, 
-            max_tokens = 1000,
+            temperature = 0.3,
+            # Los modelos de razonamiento emiten su cadena interna antes del JSON:
+            # con 1000 la respuesta se truncaba y el parseo fallaba de forma intermitente.
+            max_tokens = int(os.getenv("AI_MAX_TOKENS", "4000")),
         )
         
         raw_content = completion.choices[0].message.content.strip()
@@ -147,15 +175,50 @@ def generate_routine(payload: WorkoutRequest):
             raw_content = "\n".join(lines).strip()
 
         parsed_data = json.loads(raw_content)
-        return RutinaResponse(**parsed_data)
+        return RutinaResponse(modo = "ia", **parsed_data)
 
     except json.JSONDecodeError:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail="La respuesta del modelo de IA no cumplió con el formato JSON requerido."
         )
-    except Exception as exc:
+    except ValidationError:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="La respuesta del modelo de IA no tiene la estructura esperada."
+        )
+    except openai.AuthenticationError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="La credencial del proveedor de IA no es válida. Contacta con el administrador."
+        )
+    except openai.RateLimitError:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Se ha excedido la cuota o el límite de peticiones del proveedor de IA. Inténtalo más tarde."
+        )
+    except openai.APITimeoutError:
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail="El proveedor de IA ha excedido el tiempo de espera. Inténtalo más tarde."
+        )
+    except openai.APIConnectionError:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="No se ha podido conectar con el proveedor de IA. Inténtalo más tarde."
+        )
+    except openai.APIStatusError:
+        # Errores 4xx/5xx del proveedor que no encajan con los casos anteriores
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="El proveedor de IA ha devuelto un error inesperado. Inténtalo más tarde."
+        )
+    except HTTPException:
+        raise
+    except Exception:
+        # Se registra el detalle completo solo en el servidor; nunca se filtra al cliente
+        logger.exception("Error inesperado durante la generación de la rutina")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error durante el procesamiento de la rutina: {str(exc)}"
+            detail="Error interno al procesar la rutina. Inténtalo más tarde."
         )
