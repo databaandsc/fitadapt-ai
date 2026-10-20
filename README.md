@@ -85,7 +85,66 @@ La configuración inyectada mediante variables de entorno garantiza el confinami
 
 ## 10. Operación, Verificación y Tests
 
-*(Documentación pendiente - Detalle de pruebas Pytest/Vitest y comprobaciones manuales)*
+El proyecto incluye un entorno de pruebas automatizadas en ambos extremos (frontend y backend) para garantizar la solidez de los esquemas de validación y el renderizado de la interfaz.
+
+### 10.1. Ejecución en Entorno Local
+
+Para operar la aplicación en modo desarrollo, es necesario levantar ambos servicios en terminales separadas desde la raíz del proyecto:
+
+1. **Backend (FastAPI):**
+   ```bash
+   source .venv/bin/activate
+   uvicorn api.index:app --reload --port 8000
+   ```
+
+2. **Frontend (Vite + Vue 3):**
+   **Bash**
+
+   ```
+   npm run dev
+   ```
+
+   *(La aplicación estará disponible en `http://localhost:5173` y enrutará las peticiones `/api` al puerto 8000 mediante el proxy de Vite).*
+
+### 10.2. Pruebas Automatizadas del Backend (Pytest)
+
+El backend utiliza `pytest` y `TestClient` para validar la lógica y los endpoints sin necesidad de levantar el servidor.
+
+* **Ejecución de la suite:**
+  **Bash**
+
+  ```
+  pytest -v
+  ```
+* **Casos de prueba cubiertos:**
+
+  * `test_health_check`: Verifica la disponibilidad de la API y el modo de ejecución actual.
+  * `test_pydantic_validation`: Comprueba el rechazo de peticiones inválidas (ej. tiempo fuera de rango o equipamiento vacío) devolviendo HTTP 422.
+  * `test_generate_routine_mock_success`: Evalúa el flujo completo de generación de rutinas aislando al proveedor de IA mediante `unittest.mock.patch`, comprobando la respuesta HTTP 200 y la estructura del JSON.
+
+### 10.3. Pruebas Automatizadas del Frontend (Vitest)
+
+El frontend emplea `vitest` junto a `@vue/test-utils` sobre un entorno emulado (`jsdom`).
+
+* **Ejecución de pruebas de interfaz:**
+  **Bash**
+
+  ```
+  npm test
+  ```
+* **Verificación estricta de tipado (TypeScript):** Asegura que el contrato de datos coincida con los esquemas de Pydantic sin emitir errores de compilación:
+  **Bash**
+
+  ```
+  npx vue-tsc --noEmit
+  ```
+
+### 10.4. Comprobaciones Manuales y Modo Demo
+
+Para evitar consumir la cuota (tokens) de OpenAI/Groq durante el desarrollo de la interfaz, el sistema incluye un **Modo Demo** determinista.
+
+* Si la variable de entorno `FITADAPT_MODE=demo` (o si no se configura una API Key válida en desarrollo), el backend generará rutinas instantáneas de un catálogo local.
+* **Verificaciones UI:** Al probar manualmente la SPA, se debe comprobar que el formulario se bloquea y el spinner se activa durante la petición asíncrona, y que los componentes de error renderizan correctamente ante fallos de red simulados.
 
 ## 11. Registro de Problemas y Soluciones
 
