@@ -1,7 +1,11 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue';
+import { SignInButton, UserButton, useAuth } from '@clerk/vue';
+const { isSignedIn } = useAuth();
 import {
   Dumbbell,
+
+
   Brain,
   Clock,
   Target,
@@ -15,6 +19,7 @@ import {
   Lightbulb,
   ShieldAlert,
 } from 'lucide-vue-next';
+
 import type {
   Objetivo,
   Nivel,
@@ -122,7 +127,28 @@ const handleSubmit = async (): Promise<void> => {
   <!-- ════════════════════════════════════════════════════════════
        SHELL: fondo oscuro con malla y luces ambientales
   ═════════════════════════════════════════════════════════════ -->
+  <header class="sticky top-0 z-50 w-full border-b border-white/5 bg-slate-950/80 backdrop-blur-xl">
+    <div class="max-w-screen-xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between">
+      <div class="flex items-center gap-2">
+        <div class="inline-flex items-center justify-center p-1.5 bg-violet-500/10 text-violet-400 rounded-lg border border-violet-500/20">
+          <Dumbbell class="w-4 h-4" />
+        </div>
+        <span class="text-sm font-semibold tracking-tight text-white">FitAdaptAI</span>
+      </div>
+      <div class="flex items-center gap-2">
+        <template v-if="!isSignedIn">
+          <SignInButton mode="modal" class="px-3 py-1.5 rounded-md bg-violet-500 text-white text-sm font-medium hover:bg-violet-400 transition-colors">
+            Iniciar sesión
+          </SignInButton>
+        </template>
+        <template v-else>
+          <UserButton />
+        </template>
+      </div>
+    </div>
+  </header>
   <div class="fitadapt-shell min-h-screen overflow-x-hidden">
+
 
     <!-- Luces de fondo decorativas -->
     <div class="fixed inset-0 -z-10 overflow-hidden" aria-hidden="true">
