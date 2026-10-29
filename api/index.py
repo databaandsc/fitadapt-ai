@@ -3,7 +3,7 @@ import json
 import logging
 from enum import Enum
 from typing import List, Literal
-from fastapi import FastAPI, HTTPException, status
+from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, ValidationError
 from dotenv import load_dotenv
@@ -12,18 +12,20 @@ from openai import OpenAI
 
 try:
     from .demo import generar_rutina_demo
+    from .auth_middleware import ClerkAuthMiddleware
 except ImportError:  # pragma: no cover - solo aplica si se ejecuta como módulo suelto (p. ej. Vercel)
     # Vercel ejecuta este archivo como módulo suelto desde el directorio api/.
     from demo import generar_rutina_demo
+    from auth_middleware import ClerkAuthMiddleware
 
 load_dotenv()
 
 logger = logging.getLogger("fitadapt.api")
 
 app = FastAPI(
-    title = "FitAdaptAI API",
-    description = "Backend serverless para la generación de planes de entrenamiento personalizados",
-    version = "1.0.0"
+    title="FitAdaptAI API",
+    description="Backend serverless para la generación de planes de entrenamiento personalizados",
+    version="1.0.0",
 )
 
 # 1. Configuracion de CORS
@@ -34,6 +36,10 @@ app.add_middleware(
     allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
 )
+
+# Autenticación Clerk (protege /api/* excepto /api/health)
+app.add_middleware(ClerkAuthMiddleware)
+
 
 # 2. Esquema de validación de entrda de datos
 
@@ -105,8 +111,17 @@ def health_check():
     return {"status": "ok", "service": "FitAdaptAI API (Python/FastAPI)", "modo": get_run_mode()}
 
 
-@app.post("/api/generate-routine", response_model = RutinaResponse)
+@app.get("/api/me")
+def get_current_user(request: Request):
+    return {
+        "user_id": getattr(request.state, "user_id", None),
+        "session_id": getattr(request.state, "session_id", None),
+    }
+
+
+@app.post("/api/generate-routine", response_model=RutinaResponse)
 def generate_routine(payload: WorkoutRequest):
+
     modo = get_run_mode()
 
     # Modo demo: rutina local determinista, sin cliente ni red.

@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue';
 import { SignInButton, UserButton, useAuth } from '@clerk/vue';
+import { useApi } from './composables/useApi';
 const { isSignedIn } = useAuth();
+const { fetchWithAuth } = useApi();
+
 import {
   Dumbbell,
 
@@ -93,14 +96,12 @@ const handleSubmit = async (): Promise<void> => {
   const controller = new AbortController();
   const timeout = window.setTimeout(() => controller.abort(), 55000);
   try {
-    const response = await fetch('/api/generate-routine', {
+    const response = await fetchWithAuth('/api/generate-routine', {
       method: 'POST',
       signal: controller.signal,
-      headers: {
-        'Content-Type': 'application/json',
-      },
       body: JSON.stringify(payload),
     });
+
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
@@ -158,6 +159,33 @@ const handleSubmit = async (): Promise<void> => {
       <!-- Rejilla sutil -->
       <div class="absolute inset-0 bg-[linear-gradient(rgba(99,102,241,0.03)_1px,transparent_1px),linear-gradient(90deg,rgba(99,102,241,0.03)_1px,transparent_1px)] bg-[size:64px_64px]"></div>
     </div>
+
+    <template v-if="!isSignedIn">
+      <main class="relative min-h-[calc(100vh-3.5rem)] flex items-center justify-center px-4">
+        <div class="max-w-md w-full text-center space-y-6">
+          <div class="flex justify-center">
+            <div class="inline-flex items-center justify-center p-3 bg-violet-500/10 text-violet-400 rounded-2xl border border-violet-500/20">
+              <Dumbbell class="w-8 h-8" />
+            </div>
+          </div>
+          <div class="space-y-2">
+            <h1 class="text-3xl sm:text-4xl font-black tracking-tight text-white">
+              Fit<span class="text-violet-400">Adapt</span> AI
+            </h1>
+            <p class="text-slate-400">Inicia sesión para generar tu rutina personalizada con IA</p>
+          </div>
+          <div class="flex justify-center">
+            <SignInButton mode="modal" class="cta-btn max-w-xs">
+              <span>Iniciar sesión para continuar</span>
+              <ChevronRight class="w-4 h-4" />
+            </SignInButton>
+          </div>
+        </div>
+      </main>
+    </template>
+
+    <template v-else>
+
 
     <!-- ── TOP NAV BAR ── -->
     <nav class="sticky top-0 z-50 border-b border-white/5 bg-[#09090f]/80 backdrop-blur-xl">
@@ -485,9 +513,11 @@ const handleSubmit = async (): Promise<void> => {
       Propuesta orientativa. Ajusta la carga a tu capacidad y detente si aparece dolor.<br>
       RPE indica el esfuerzo percibido en una escala del 1 al 10.
     </footer>
+    </template>
 
   </div>
 </template>
+
 
 <style scoped>
 /* ─── SHELL ─── */

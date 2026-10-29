@@ -116,7 +116,15 @@ Se utilizó **Vercel CLI v64.x** para la vinculación, configuración de secreto
 
 ## 7. Autenticación (Clerk)
 
-*(Documentación pendiente )*
+La aplicación requiere autenticación con **Clerk** para poder utilizarla.
+
+- **Frontend (Vue 3 + @clerk/vue):** Se integra con `clerkPlugin` en `src/main.ts`. La aplicación muestra una pantalla de inicio de sesión cuando no hay sesión (`SignInButton` en modo modal). Una vez autenticado, se muestra el `UserButton` y se puede generar la rutina.
+- **Backend (FastAPI):** Middleware `ClerkAuthMiddleware` en `api/auth_middleware.py` protege las rutas `/api/*` excepto `/api/health`. Las peticiones deben incluir `Authorization: Bearer <token>` obtenido con `getToken()` desde el frontend. El endpoint `/api/me` devuelve información del usuario autenticado.
+- **Variables de entorno necesarias:**
+  - `VITE_CLERK_PUBLISHABLE_KEY` (frontend)
+  - `CLERK_SECRET_KEY` (backend)
+- **Protección:** Solo usuarios autenticados pueden acceder a la funcionalidad de generación de rutinas. Las rutas públicas son `/api/health`.
+
 
 ## 8. Contenerización (Docker)
 
