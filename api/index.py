@@ -9,6 +9,9 @@ from pydantic import BaseModel, Field, ValidationError
 from dotenv import load_dotenv
 import openai
 from openai import OpenAI
+from pathlib import Path
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 try:
     from .demo import generar_rutina_demo
@@ -237,3 +240,19 @@ def generate_routine(payload: WorkoutRequest):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error interno al procesar la rutina. Inténtalo más tarde."
         )
+
+# 5. Servir SPA compilada (dist/) cuando se ejecuta en contenedor Docker
+DIST_DIR = Path(__file__).resolve().parent.parent / "dist"
+if DIST_DIR.is_dir():
+    assets_dir = DIST_DIR / "assets"
+    if assets_dir.is_dir():
+        app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def serve_spa(full_path: str):
+        if full_path.startswith("api/"):
+            raise HTTPException(status_code=404, detail="Endpoint no encontrado")
+        file_path = (DIST_DIR / full_path).resolve()
+        if full_path and file_path.is_file() and DIST_DIR in file_path.parents:
+            return FileResponse(file_path)
+        return FileResponse(DIST_DIR / "index.html")
