@@ -1,0 +1,29 @@
+# Variables locales
+.env
+.env.*
+!.env.example
+
+# Entornos y dependencias locales
+node_modules
+.venv
+venv
+__pycache__
+*.py[cod]
+
+# Artefactos previos, tests y control de versiones
+dist
+.git
+.gitignore
+.vercel
+.vscode
+coverage
+.pytest_cache
+playwright-report
+test-results
+e2e
+tests
+*.log
+*.md
+*.html
+!index.html
+*.png
