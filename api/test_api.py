@@ -32,7 +32,11 @@ def test_rechazo_sin_autenticacion():
     assert "No autorizado" in response.json()["detail"]
 
 
-def test_pydantic_validation_tiempo_fuera_de_rango():
+@patch(
+    "api.auth_middleware.ClerkAuthMiddleware._verify",
+    return_value={"sub": "user_test_123", "sid": "sess_test_123"},
+)
+def test_pydantic_validation_tiempo_fuera_de_rango(_mock_verify):
     """Verifica que tiempos inferiores a 20 o superiores a 75 sean rechazados con 422."""
     payload = {
         "objetivo": "hipertrofia",
@@ -43,7 +47,12 @@ def test_pydantic_validation_tiempo_fuera_de_rango():
     response = client.post("/api/generate-routine", json=payload, headers=AUTH_HEADERS)
     assert response.status_code == 422
 
-def test_pydantic_validation_equipamiento_vacio():
+
+@patch(
+    "api.auth_middleware.ClerkAuthMiddleware._verify",
+    return_value={"sub": "user_test_123", "sid": "sess_test_123"},
+)
+def test_pydantic_validation_equipamiento_vacio(_mock_verify):
     """Verifica que una lista de equipamiento vacía sea rechazada con 422."""
     payload = {
         "objetivo": "fuerza",
@@ -54,8 +63,13 @@ def test_pydantic_validation_equipamiento_vacio():
     response = client.post("/api/generate-routine", json=payload, headers=AUTH_HEADERS)
     assert response.status_code == 422
 
+
+@patch(
+    "api.auth_middleware.ClerkAuthMiddleware._verify",
+    return_value={"sub": "user_test_123", "sid": "sess_test_123"},
+)
 @patch("api.index.get_ai_client")
-def test_generate_routine_mock_success(mock_get_client):
+def test_generate_routine_mock_success(mock_get_client, _mock_verify):
     """Comprueba el flujo de generación exitoso aislando el servicio de IA mediante un mock."""
     mock_payload = {
         "calentamiento": "Movilidad escapular y 5 minutos de cinta suave.",
