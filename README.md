@@ -11,7 +11,7 @@ Aplicación web de pantalla única (SPA) enfocada en el acondicionamiento físic
 
 ## 2. Plan de Documentación
 
-Este documento está dirigido a ingenieros de sistemas, desarrolladores y evaluadores que necesiten reproducir, desplegar o diagnosticar la aplicación. Sigue un enfoque incremental (Diátaxis): la documentación técnica se actualizará a medida que se completen los hitos de infraestructura (Vercel, Clerk, Docker, AWS). Se priorizan instrucciones reproducibles, comandos exactos y tablas de configuración.
+Este documento está dirigido a ingenieros de sistemas, desarrolladores y evaluadores que necesiten reproducir, desplegar o diagnosticar la aplicación. Sigue un enfoque incremental ([Diátaxis](https://diataxis.fr/)): la documentación técnica se actualizará a medida que se completen los hitos de infraestructura (Vercel, Clerk, Docker, AWS). Se priorizan instrucciones reproducibles, comandos exactos y tablas de configuración.
 
 ## 3. Arquitectura del Sistema
 
@@ -21,10 +21,13 @@ La aplicación sigue un modelo de desacoplamiento entre cliente y servidor, unif
 * **Backend (API):** Servicio desarrollado en Python con FastAPI. Expone endpoints REST y valida los contratos de datos (entradas y salidas) de forma estricta utilizando Pydantic v2.
 * **Proveedor de IA:** El backend actúa como intermediario seguro, inyectando un *System Prompt* defensivo y comunicándose con la API de Groq/OpenAI. Las claves privadas nunca viajan al navegador del cliente.
 * **Autenticación (Clerk):** El frontend gestiona el inicio de sesión con Clerk y adjunta un token JWT a cada petición. El backend verifica criptográficamente la firma de ese token antes de atender cualquier ruta protegida (ver sección 7).
+* **Diferencia entre entornos de despliegue:**
+  * **Vercel (Serverless):** El CDN de Vercel sirve `dist/` y ejecuta `api/index.py` bajo demanda mediante Vercel Functions.
+  * **Docker / AWS EC2 (Contenedor único):** Un único contenedor ejecuta `uvicorn` en `0.0.0.0:8000`; FastAPI sirve tanto los endpoints `/api/*` como los archivos estáticos compilados en `dist/`.
 
 ## 4. Requisitos e Instalación Local
 
-Para levantar el entorno de desarrollo y pruebas en local, se requiere **Node.js (18.x o superior)** y **Python (3.10 o superior)**.
+Para levantar el entorno de desarrollo y pruebas en local, se requiere **Node.js (18.x o superior)**, **Python (3.10 o superior)** y **Docker (24.x o superior)**.
 
 ### 4.1. Configuración del Backend (FastAPI)
 
@@ -60,24 +63,22 @@ npm run dev
 
 ## 5. Variables de Entorno
 
-La configuración inyectada mediante variables de entorno garantiza el confinamiento de secretos. En desarrollo local se utilizan dos archivos, ambos excluidos del control de versiones mediante `.gitignore` (regla `.env*`):
+La configuración inyectada mediante variables de entorno garantiza el confinamiento de secretos. En desarrollo local se utilizan dos archivos, ambos excluidos del control de versiones mediante `.gitignore` y `.dockerignore` (con `.env.example` como plantilla pública de referencia):
 
-* **`.env`** → lo lee el **backend** (`load_dotenv()` en `api/index.py`).
+* **`.env`** → lo lee el **backend** (`load_dotenv()` en `api/index.py` o `--env-file` en Docker).
 * **`.env.local`** → lo lee el **frontend** (Vite). Solo las variables con prefijo `VITE_` se incorporan al código que se envía al navegador.
 
-| **Variable**                 | **Finalidad**                                                                 | **Tipo**    | **Ubicación / Entorno**                |
-| ---------------------------- | ----------------------------------------------------------------------------- | ----------- | -------------------------------------- |
-| `OPENAI_API_KEY`             | Credencial de acceso a la API del LLM (Groq/OpenAI).                          | **Secreto** | `.env` / Runtime Backend               |
-| `OPENAI_BASE_URL`            | URL base para derivar el tráfico a proveedores compatibles (ej. Groq).        | Pública     | `.env` / Runtime Backend               |
-| `AI_MODEL`                   | Nombre del modelo a instanciar (ej. `llama-3.3-70b-versatile`).               | Pública     | `.env` / Runtime Backend               |
-| `AI_MAX_TOKENS`              | Límite de tokens de la respuesta del modelo (opcional, por defecto `4000`).   | Pública     | `.env` / Runtime Backend               |
-| `FITADAPT_MODE`              | Modo de ejecución: `ia` (por defecto) o `demo` (catálogo local, sin IA).      | Pública     | `.env` / Runtime Backend               |
-| `CLERK_SECRET_KEY`           | Clave secreta de Clerk. Permite al backend obtener las claves públicas (JWKS) con las que verifica los tokens. | **Secreto** | `.env` / Runtime Backend |
-| `VITE_CLERK_PUBLISHABLE_KEY` | Clave publicable de Clerk. Inicializa el SDK en el navegador. Es pública por diseño. | Pública | `.env.local` / Build Frontend |
+| **Variable**                 | **Finalidad**                                                                 | **Tipo**    | **Ubicación / Entorno**                              | **Momento de uso**      |
+| ---------------------------- | ----------------------------------------------------------------------------- | ----------- | ---------------------------------------------------- | ----------------------- |
+| `OPENAI_API_KEY`             | Credencial de acceso a la API del LLM (Groq/OpenAI).                          | **Secreto** | `.env` / `--env-file` en Docker / Vercel Env         | Ejecución (Runtime)     |
+| `OPENAI_BASE_URL`            | URL base para derivar el tráfico a proveedores compatibles (ej. Groq).        | Pública     | `.env` / `--env-file` en Docker / Vercel Env         | Ejecución (Runtime)     |
+| `AI_MODEL`                   | Nombre del modelo a instanciar (ej. `openai/gpt-oss-120b`).                   | Pública     | `.env` / `--env-file` en Docker / Vercel Env         | Ejecución (Runtime)     |
+| `AI_MAX_TOKENS`              | Límite de tokens de la respuesta del modelo (opcional, por defecto `4000`).   | Pública     | `.env` / `--env-file` en Docker / Vercel Env         | Ejecución (Runtime)     |
+| `FITADAPT_MODE`              | Modo de ejecución: `ia` (por defecto) o `demo` (catálogo local, sin IA).      | Pública     | `.env` / `--env-file` en Docker / Vercel Env         | Ejecución (Runtime)     |
+| `CLERK_SECRET_KEY`           | Clave secreta de Clerk. Permite al backend obtener las claves públicas (JWKS) con las que verifica los tokens. | **Secreto** | `.env` / `--env-file` en Docker / Vercel Env | Ejecución (Runtime) |
+| `VITE_CLERK_PUBLISHABLE_KEY` | Clave publicable de Clerk. Inicializa el SDK en el navegador. Es pública por diseño. | Pública | `.env.local` / `--build-arg` en Docker / Vercel Env | **Compilación (Build)** |
 
 > ⚠️ `CLERK_SECRET_KEY` **nunca** debe llevar el prefijo `VITE_`: si lo llevara, Vite la incluiría en el JavaScript público y quedaría expuesta a cualquier visitante.
-
-*(Las siguientes secciones se irán completando a medida que se superen las fases de despliegue y configuración exigidas en la práctica).*
 
 ## 6. Despliegue en Vercel (Fase 3 · Serverless)
 
@@ -169,7 +170,7 @@ sequenceDiagram
 ### 7.2. Frontend (Vue 3 + `@clerk/vue`)
 
 * Se integra con `clerkPlugin` en `src/main.ts`, inicializado con `VITE_CLERK_PUBLISHABLE_KEY`.
-* Cuando no hay sesión, la aplicación muestra una pantalla de inicio de sesión (`SignInButton` en modo modal). Una vez autenticado, se muestra el `UserButton` y se puede generar la rutina.
+* Cuando no hay sesión, la aplicación muestra una pantalla de inicio de sesión (`SignIn`). Una vez autenticado, se muestra el `UserButton` y se puede generar la rutina.
 * El composable `src/composables/useApi.ts` obtiene el token con `getToken()` y lo adjunta en la cabecera `Authorization: Bearer <token>` de cada petición a la API.
 * Dependencia declarada en `package.json`: `@clerk/vue`.
 
@@ -190,12 +191,12 @@ El endpoint `GET /api/me` devuelve el `user_id` y `session_id` del usuario auten
 
 ### 7.4. Configuración
 
-| Variable | Dónde (local) | Dónde (Vercel) | Uso |
-| :--- | :--- | :--- | :--- |
-| `VITE_CLERK_PUBLISHABLE_KEY` | `.env.local` | Variable de entorno (`Config`) | Frontend |
-| `CLERK_SECRET_KEY` | `.env` | Variable de entorno (`Secret`) | Backend |
+| Variable | Dónde (local) | Dónde (Vercel) | Dónde (Docker / EC2) | Uso |
+| :--- | :--- | :--- | :--- | :--- |
+| `VITE_CLERK_PUBLISHABLE_KEY` | `.env.local` | Variable de entorno (`Config`) | `--build-arg` al construir imagen | Frontend (Build) |
+| `CLERK_SECRET_KEY` | `.env` | Variable de entorno (`Secret`) | `--env-file .env` al ejecutar | Backend (Runtime) |
 
-* Se utilizan claves de una **instancia de desarrollo** de Clerk (`pk_test_...` / `sk_test_...`), que funcionan en cualquier dominio (`localhost`, `*.vercel.app`). Las claves de producción (`pk_live_...`) quedan restringidas al dominio configurado en Clerk.
+* Se utilizan claves de una **instancia de desarrollo** de Clerk (`pk_test_...` / `sk_test_...`), que funcionan en cualquier dominio (`localhost`, `*.vercel.app`, IP pública de EC2). Las claves de producción (`pk_live_...`) quedan restringidas al dominio configurado en Clerk.
 * Varios despliegues (por ejemplo, en cuentas de Vercel distintas de cada integrante) pueden compartir la misma aplicación de Clerk utilizando las mismas claves; los usuarios registrados son comunes.
 * Proveedores de acceso habilitados: email + contraseña y Google.
 
@@ -235,9 +236,63 @@ copy(await window.Clerk.session.getToken())
 
 El token queda copiado en el portapapeles y caduca en unos 60 segundos. En macOS puede usarse directamente con `curl -i -H "Authorization: Bearer $(pbpaste)" <URL>/api/me`.
 
-## 8. Contenerización (Docker)
+## 8. Contenerización (Docker · Fase 5)
 
-*(Documentación pendiente)*
+La aplicación completa se empaqueta y ejecuta en **un único contenedor Docker** mediante una construcción multi-etapa (`Dockerfile`):
+
+1. **Etapa 1 (`frontend-builder` · `node:22-alpine`):** instala dependencias con `npm ci` y compila la SPA Vue 3 + TypeScript + Tailwind en `/app/dist`. Recibe únicamente la clave pública `VITE_CLERK_PUBLISHABLE_KEY` mediante `--build-arg` para que Vite la incorpore al bundle estático.
+2. **Etapa 2 (`runtime` · `python:3.14-slim`):** instala las dependencias de `requirements.txt` (incluyendo `PyJWT[crypto]` para la verificación de firma de Clerk), copia `api/` y los estáticos compilados `/app/dist`, crea un usuario sin privilegios (`appuser`) y expone el puerto `8000` ejecutando `uvicorn api.index:app --host 0.0.0.0 --port 8000`. FastAPI sirve tanto los endpoints `/api/*` como la SPA compilada (`dist/`).
+3. **Exclusión de secretos (`.dockerignore`):** los archivos `.env`, `.env.*`, `node_modules`, `.venv` y `.git` están excluidos del contexto de construcción (`~255 KB`). Ningún secreto privado forma parte del `Dockerfile` ni de las capas de la imagen.
+
+### 8.1. Construcción de la Imagen
+
+```bash
+docker build \
+  --build-arg VITE_CLERK_PUBLISHABLE_KEY="pk_test_..." \
+  -t fitadaptai:v0.5-docker .
+```
+
+### 8.2. Ejecución del Contenedor e Inyección de Secretos
+
+Los secretos (`OPENAI_API_KEY`, `CLERK_SECRET_KEY`) se inyectan exclusivamente en tiempo de ejecución mediante `--env-file .env`, publicando el puerto `8000` del contenedor en el host:
+
+```bash
+docker run -d \
+  --name fitadaptai \
+  -p 8000:8000 \
+  --env-file .env \
+  fitadaptai:v0.5-docker
+```
+
+### 8.3. Operación, Logs, Parada y Reinicio
+
+| Operación | Comando | Resultado verificado |
+| :--- | :--- | :--- |
+| **Consultar estado** | `docker ps` | Contenedor `fitadaptai` en estado `Up` (`0.0.0.0:8000->8000/tcp`). |
+| **Consultar logs** | `docker logs --tail 50 fitadaptai` | Arranque de Uvicorn en `http://0.0.0.0:8000` y trazas HTTP `200 OK` / `401 Unauthorized`. |
+| **Detener contenedor** | `docker stop fitadaptai` | Contenedor detenido limpiamente (`Exited (0)`). |
+| **Iniciar contenedor** | `docker start fitadaptai` | Servicio restaurado conservando su configuración de red y variables. |
+| **Reiniciar contenedor** | `docker restart fitadaptai` | Reinicio inmediato del proceso Uvicorn. |
+
+### 8.4. Verificación del Contenedor Completo en Local
+
+* **Interfaz SPA y autenticación:** accesible en `http://localhost:8000`, mostrando el flujo de inicio de sesión de Clerk y el generador de rutinas tras autenticarse.
+* **Salud pública (`GET /api/health`):**
+  ```bash
+  curl -i http://localhost:8000/api/health
+  # HTTP/1.1 200 OK -> {"status":"ok","service":"FitAdaptAI API (Python/FastAPI)","modo":"ia"}
+  ```
+* **Rechazo sin autenticación (`POST /api/generate-routine`):**
+  ```bash
+  curl -i -X POST http://localhost:8000/api/generate-routine \
+    -H "Content-Type: application/json" \
+    -d '{"objetivo":"hipertrofia","tiempo_minutos":45,"equipamiento":["mancuernas"],"nivel":"intermedio"}'
+  # HTTP/1.1 401 Unauthorized -> {"detail":"No autorizado. Inicia sesión con Clerk."}
+  ```
+
+### 8.5. Estrategia de Construcción y Traslado a AWS EC2
+
+Para el despliegue en **AWS EC2** (Fase 6), no se requiere un registro externo de imágenes: se clonará el repositorio público directamente en la instancia EC2 situándose en el tag versionado (`v0.5-docker` / `v1.0-aws`), se construirá la imagen localmente en la instancia con `docker build` y se ejecutará el contenedor inyectando un archivo `.env` privado en el servidor con permisos restringidos (`chmod 600 .env`) y política de reinicio `--restart unless-stopped`.
 
 ## 9. Despliegue en AWS EC2
 
@@ -268,19 +323,17 @@ Para operar la aplicación en modo desarrollo, es necesario configurar las varia
 
 ### 10.2. Pruebas Automatizadas del Backend (Pytest)
 
-El backend utiliza `pytest` y `TestClient` para validar la lógica y los endpoints sin necesidad de levantar el servidor.
+El backend utiliza `pytest` y `TestClient` para validar la lógica y los endpoints sin necesidad de levantar el servidor ni realizar llamadas de pago al proveedor de IA.
 
 * **Ejecución de la suite:**
   ```bash
-  pytest -v
+  .venv/bin/python -m pytest -v
   ```
-* **Casos de prueba cubiertos:**
-
-  * `test_health_check`: Verifica la disponibilidad de la API y el modo de ejecución actual.
-  * `test_pydantic_validation`: Comprueba el rechazo de peticiones inválidas (ej. tiempo fuera de rango o equipamiento vacío) devolviendo HTTP 422.
-  * `test_generate_routine_mock_success`: Evalúa el flujo completo de generación de rutinas aislando al proveedor de IA mediante `unittest.mock.patch`, comprobando la respuesta HTTP 200 y la estructura del JSON.
-
-> ⚠️ **Estado actual:** desde la incorporación de la autenticación con Clerk, las pruebas que llaman a `/api/generate-routine` envían peticiones sin token y reciben `401` en lugar de `422`/`200`. Solo `test_health_check` (ruta pública) pasa. Queda pendiente adaptar la suite simulando la verificación del token (ver incidencia 8 en la sección 11).
+* **Casos de prueba cubiertos (`5 passed`):**
+  * `test_health_check`: Verifica la disponibilidad de la API (`/api/health`) y el modo de ejecución actual.
+  * `test_rechazo_sin_autenticacion`: Verifica que una petición directa a `POST /api/generate-routine` sin token de Clerk sea rechazada con `HTTP 401 Unauthorized`.
+  * `test_pydantic_validation_tiempo_fuera_de_rango` y `test_pydantic_validation_equipamiento_vacio`: Comprueban el rechazo de peticiones inválidas devolviendo `HTTP 422`.
+  * `test_generate_routine_mock_success`: Evalúa el flujo completo autenticado aislando la verificación JWT y al proveedor de IA mediante `unittest.mock.patch`, comprobando la respuesta `HTTP 200` y la estructura del JSON.
 
 ### 10.3. Pruebas Automatizadas del Frontend (Vitest)
 
@@ -337,18 +390,23 @@ Para evitar consumir la cuota (tokens) de OpenAI/Groq durante el desarrollo de l
   * **Síntoma:** Con un token válido emitido por Clerk, la API devolvía `401 "No se pudo validar la sesión con Clerk"`.
   * **Causa:** `PyJWKClient` descarga las claves con `urllib`, que se identifica como `User-Agent: Python-urllib/3.x`. El cortafuegos de la API de Clerk bloquea ese agente con `403 Forbidden`.
   * **Solución:** Enviar una cabecera `User-Agent` propia (`fitadaptai-backend`) en las peticiones a JWKS.
-* **Incidencia 8 (pendiente):** Suite de Pytest desactualizada respecto a la autenticación.
+* **Incidencia 8:** Suite de Pytest desactualizada respecto a la autenticación.
 
-  * **Síntoma:** `pytest` → `3 failed, 1 passed`; las pruebas reciben `401` en lugar de `422`/`200`.
-  * **Causa:** Las pruebas llaman a rutas protegidas sin token.
-  * **Solución propuesta:** Simular (*mock*) la verificación del token en las pruebas o enviar un token de prueba.
+  * **Síntoma:** `pytest` → `3 failed, 1 passed`; las pruebas recibían `401` en lugar de `422`/`200`.
+  * **Causa:** Las pruebas llamaban a rutas protegidas sin token tras integrar `ClerkAuthMiddleware`.
+  * **Solución:** Se añadió `test_rechazo_sin_autenticacion` (`401`) y se simuló (`unittest.mock.patch`) la verificación `ClerkAuthMiddleware._verify` en las pruebas autenticadas de validación y generación (`5 passed`).
 * **Incidencia 9:** El backend local respondía `401 "Falta configuración de Clerk en el servidor"`.
 
   * **Causa:** `CLERK_SECRET_KEY` se había añadido a `.env.local`, que solo lee Vite; el backend únicamente carga `.env`.
   * **Solución:** Mover la variable a `.env` y reiniciar `uvicorn` (`--reload` no detecta cambios en `.env`).
+* **Incidencia 10:** Ubicación de `.dockerignore` y advertencia de BuildKit sobre `VITE_CLERK_PUBLISHABLE_KEY`.
+
+  * **Síntoma:** Inicialmente `.dockerignore` se creó dentro de `api/.dockerignore`, por lo que Docker no filtraba el contexto de la raíz; además, BuildKit mostraba un aviso `SecretsUsedInArgOrEnv` sobre `VITE_CLERK_PUBLISHABLE_KEY`.
+  * **Diagnóstico y Solución:** Se movió `.dockerignore` a la raíz del repositorio (reduciendo el contexto transferido al daemon a `254 KB` y garantizando la exclusión de `.env`). Respecto al aviso de BuildKit, se verificó que `VITE_CLERK_PUBLISHABLE_KEY` (`pk_test_...`) es una clave **pública** que Vite requiere en tiempo de compilación, mientras que las claves **secretas** (`OPENAI_API_KEY`, `CLERK_SECRET_KEY`) jamás se declaran en el `Dockerfile` y solo se inyectan en ejecución con `--env-file`.
 
 ## 12. Historial de Versiones (Git y Evidencias)
 
+* `v0.5-docker`: Aplicación completa contenerizada en una única imagen Docker multi-etapa (Vue 3 compilado + FastAPI sirviendo estáticos y API protegida con Clerk), verificada localmente.
 * `v0.4-clerk`: Autenticación con Clerk operativa en producción. Dependencia `@clerk/vue` registrada, CSP adaptada a Clerk (SDK, login con Google y protección anti-bots) y verificación criptográfica de la firma JWT en el backend con `PyJWT`.
 * `v0.3.0` / `v0.3-vercel`: Despliegue *full-stack serverless* completado en Vercel (Fase 3). SPA Vue 3 y FastAPI unificados en un único proyecto, configuración de enrutamiento en `vercel.json`, variables de entorno protegidas y monitorización mediante Vercel CLI.
 * `v0.1-backend`: Estructura base de FastAPI, modelos Pydantic y lógica de IA completada y probada.
