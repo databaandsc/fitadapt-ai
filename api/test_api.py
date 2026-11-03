@@ -6,11 +6,31 @@ from api.index import app
 
 client = TestClient(app)
 
+# Token JWT simulado (header.payload.signature) para pruebas autenticadas con ClerkAuthMiddleware
+AUTH_HEADERS = {
+    "Authorization": "Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ1c2VyX3Rlc3RfMTIzIiwic2lkIjoic2Vzc190ZXN0XzEyMyJ9.sig"
+}
+
+
 def test_health_check():
     response = client.get("/api/health")
     assert response.status_code == 200
     assert response.json()["status"] == "ok"
     assert "modo" in response.json()
+
+
+def test_rechazo_sin_autenticacion():
+    """Verifica que una petición directa al endpoint de IA sin token sea rechazada con 401."""
+    payload = {
+        "objetivo": "hipertrofia",
+        "tiempo_minutos": 45,
+        "equipamiento": ["mancuernas"],
+        "nivel": "intermedio"
+    }
+    response = client.post("/api/generate-routine", json=payload)
+    assert response.status_code == 401
+    assert "No autorizado" in response.json()["detail"]
+
 
 def test_pydantic_validation_tiempo_fuera_de_rango():
     """Verifica que tiempos inferiores a 20 o superiores a 75 sean rechazados con 422."""
@@ -20,7 +40,7 @@ def test_pydantic_validation_tiempo_fuera_de_rango():
         "equipamiento": ["mancuernas"],
         "nivel": "intermedio"
     }
-    response = client.post("/api/generate-routine", json=payload)
+    response = client.post("/api/generate-routine", json=payload, headers=AUTH_HEADERS)
     assert response.status_code == 422
 
 def test_pydantic_validation_equipamiento_vacio():
@@ -31,7 +51,7 @@ def test_pydantic_validation_equipamiento_vacio():
         "equipamiento": [],
         "nivel": "avanzado"
     }
-    response = client.post("/api/generate-routine", json=payload)
+    response = client.post("/api/generate-routine", json=payload, headers=AUTH_HEADERS)
     assert response.status_code == 422
 
 @patch("api.index.get_ai_client")
@@ -67,7 +87,7 @@ def test_generate_routine_mock_success(mock_get_client):
         "nivel": "intermedio"
     }
 
-    response = client.post("/api/generate-routine", json=request_data)
+    response = client.post("/api/generate-routine", json=request_data, headers=AUTH_HEADERS)
     assert response.status_code == 200
     
     data = response.json()
