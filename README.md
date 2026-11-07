@@ -583,6 +583,8 @@ El frontend emplea `vitest` junto a `@vue/test-utils` sobre un entorno emulado (
   npx vue-tsc --noEmit
   ```
 
+> ⚠️ **Estado de la suite de frontend:** los tests actuales de Vitest fueron escritos para una versión anterior de `App.vue` (esperan un elemento `<form>`, `fieldset` y atributos `aria-*` que la interfaz actual ya no utiliza), por lo que hoy fallan aunque `vue-tsc` y `vite build` terminan correctamente. No bloquea la compilación ni el despliegue; queda pendiente actualizar la suite a la UI vigente. El backend, en cambio, mantiene sus `5 passed`.
+
 ### 10.4. Comprobaciones Manuales y Modo Demo
 
 Para evitar consumir la cuota (tokens) de OpenAI/Groq durante el desarrollo de la interfaz, el sistema incluye un **Modo Demo** determinista.
