@@ -294,9 +294,244 @@ docker run -d \
 
 Para el despliegue en **AWS EC2** (Fase 6), no se requiere un registro externo de imágenes: se clonará el repositorio público directamente en la instancia EC2 situándose en el tag versionado (`v0.5-docker` / `v1.0-aws`), se construirá la imagen localmente en la instancia con `docker build` y se ejecutará el contenedor inyectando un archivo `.env` privado en el servidor con permisos restringidos (`chmod 600 .env`) y política de reinicio `--restart unless-stopped`.
 
-## 9. Despliegue en AWS EC2
+## 9. Despliegue en AWS EC2 (AWS Academy Learner Lab)
 
-*(Documentación pendiente)*
+Esta fase despliega la aplicación completa en **una única instancia EC2** que ejecuta el contenedor Docker descrito en la sección 8. FastAPI sirve en el mismo origen tanto la API (`/api/*`) como la SPA compilada (`dist/`), por lo que no se necesita configurar CORS ni un segundo servicio.
+
+### 9.1. Decisiones de arquitectura para el laboratorio
+
+El entorno de AWS Academy Learner Lab impone restricciones que condicionan el diseño:
+
+| Restricción del laboratorio | Decisión adoptada |
+| :--- | :--- |
+| Credenciales temporales que caducan al terminar la sesión | No se usa ECR: la imagen se construye dentro de la propia instancia a partir del repositorio público. |
+| ECS, ECR, Elastic Beanstalk, App Runner y balanceadores no disponibles o restringidos | Se descarta la orquestación gestionada; un único contenedor en EC2 es suficiente. |
+| Presupuesto de laboratorio limitado | Instancia `t3.small` y volumen gp3 de 16 GiB; la instancia se detiene al terminar cada práctica. |
+| Recursos efímeros si el profesor reinicia el laboratorio | Todo el despliegue es reproducible con este documento, el repositorio y el archivo `.env`. |
+| Sin dominio propio ni certificado gestionado | Se publica por HTTP en el puerto 80. Las claves de **desarrollo** de Clerk (`pk_test_` / `sk_test_`) funcionan sobre una IP pública. |
+| Región fijada por el laboratorio | Todos los recursos se crean en la misma región (habitualmente `us-east-1`). |
+
+> **Limitación conocida:** al no haber HTTPS, el navegador mostrará el aviso de conexión no segura. Es aceptable para la práctica porque Clerk se usa en modo desarrollo. Con un dominio propio se podría añadir un proxy inverso (por ejemplo, Caddy) para obtener TLS automático.
+
+### 9.2. Recursos aprovisionados
+
+| Recurso | Especificación | Finalidad |
+| :--- | :--- | :--- |
+| Instancia EC2 | `t3.small` (2 vCPU, 2 GiB RAM), Amazon Linux 2023 o Ubuntu 24.04 | Ejecutar el contenedor. |
+| Volumen EBS | 16 GiB gp3 | Sistema operativo, Docker e imagen. |
+| Par de claves | `fitadaptai-key.pem` | Acceso SSH. |
+| Security Group | `fitadaptai-sg` | Puertos 22 y 80. |
+| IP pública | Auto-asignada por el laboratorio | URL de acceso. |
+| Docker Engine | Última versión del repositorio de la distribución | Construcción y ejecución del contenedor. |
+
+Reglas de entrada del Security Group:
+
+| Puerto | Protocolo | Origen | Motivo |
+| :--- | :--- | :--- | :--- |
+| `22` | TCP | *Mi IP* (recomendado) | Administración por SSH. |
+| `80` | TCP | `0.0.0.0/0` | Acceso público a la aplicación. |
+
+El tráfico de salida permanece abierto (regla por defecto): la instancia necesita contactar con `api.groq.com` (proveedor de IA) y `api.clerk.com` (claves JWKS de autenticación).
+
+### 9.3. Pre-flight local
+
+Antes de crear recursos en AWS, se valida el repositorio en local para no descubrir fallos durante la construcción en la instancia:
+
+```bash
+npm ci                     # debe resolver el lockfile sin errores
+npm run build              # vue-tsc + vite build
+.venv/bin/python -m pytest -v
+docker build --build-arg VITE_CLERK_PUBLISHABLE_KEY="pk_test_..." -t fitadaptai:preflight .
+```
+
+Resultados obtenidos en la validación local:
+
+| Comprobación | Resultado |
+| :--- | :--- |
+| `npm ci` | ✅ Sin conflictos entre `package.json` y `package-lock.json`. |
+| `npm run build` | ✅ `dist/` generado (JS ≈ 120 kB, CSS ≈ 13 kB). |
+| `pytest` | ✅ 5 pruebas superadas, cobertura 51 %. |
+| `docker build` | ✅ Imagen construida correctamente. |
+| Contenedor local (`/api/health`, `/api/me`, `/`) | ✅ `200`, `401`, `200` respectivamente. |
+| `npm test` (Vitest) | ⚠️ Suite desactualizada respecto a la UI actual (busca `<form>` y atributos `aria-*` que ya no existen). No afecta al build ni al despliegue. |
+
+### 9.4. Aprovisionamiento en el Learner Lab
+
+1. Pulsar **Start Lab** y esperar a que el indicador esté en verde.
+2. Seleccionar la región del laboratorio (normalmente **N. Virginia, `us-east-1`**).
+3. En **EC2 → Key Pairs**, crear `fitadaptai-key` y descargar el archivo `.pem`.
+4. En **EC2 → Launch instance**:
+   * Nombre: `fitadaptai`
+   * AMI: **Amazon Linux 2023** (alternativa: Ubuntu Server 24.04 LTS)
+   * Tipo: **t3.small**
+   * Key pair: `fitadaptai-key`
+   * Red: VPC por defecto, subred pública y **Auto-assign public IP: Enable**
+   * Security Group: crear `fitadaptai-sg` con las reglas de la sección 9.2
+   * Almacenamiento: **16 GiB gp3**
+5. Anotar la **IP pública** de la instancia.
+
+### 9.5. Preparación del host
+
+Proteger la clave privada y conectar:
+
+```bash
+chmod 400 fitadaptai-key.pem
+ssh -i fitadaptai-key.pem ec2-user@IP_PUBLICA
+```
+
+Instalar Docker según la distribución:
+
+```bash
+# Amazon Linux 2023
+sudo dnf install -y docker git
+sudo systemctl enable --now docker
+sudo usermod -aG docker ec2-user
+newgrp docker
+
+# Ubuntu 24.04
+sudo apt-get update
+sudo apt-get install -y docker.io git
+sudo systemctl enable --now docker
+sudo usermod -aG docker ubuntu
+newgrp docker
+```
+
+Verificar:
+
+```bash
+docker --version
+sudo systemctl is-enabled docker   # enabled
+```
+
+### 9.6. Despliegue de la aplicación
+
+**1. Clonar el repositorio** (público, sin credenciales):
+
+```bash
+git clone https://github.com/databaandsc/fitadapt-ai.git
+cd fitadapt-ai
+git checkout main          # en despliegues posteriores: git checkout v1.0-aws
+git rev-parse --short HEAD # anotar el commit desplegado
+```
+
+**2. Crear el archivo `.env`** con los secretos. Se recomienda copiarlo desde el equipo local para no dejarlo en el historial de la shell:
+
+```bash
+# En el equipo local, desde la raíz del proyecto:
+scp -i fitadaptai-key.pem .env ec2-user@IP_PUBLICA:~/fitadapt-ai/.env
+
+# En la instancia:
+chmod 600 ~/fitadapt-ai/.env
+```
+
+Contenido mínimo (ver sección 5):
+
+```dotenv
+OPENAI_API_KEY=...
+OPENAI_BASE_URL=https://api.groq.com/openai/v1
+AI_MODEL=openai/gpt-oss-120b
+FITADAPT_MODE=ia
+CLERK_SECRET_KEY=...
+VITE_CLERK_PUBLISHABLE_KEY=pk_test_...
+```
+
+> ⚠️ `.env` está excluido por `.gitignore` y `.dockerignore`. Nunca debe commitearse ni incluirse en la imagen. `CLERK_SECRET_KEY` y `OPENAI_API_KEY` son secretos; `VITE_CLERK_PUBLISHABLE_KEY` es pública por diseño.
+
+**3. Construir la imagen.** La clave publicable se incorpora al bundle en tiempo de compilación:
+
+```bash
+cd ~/fitadapt-ai
+export VITE_CLERK_PUBLISHABLE_KEY=$(grep '^VITE_CLERK_PUBLISHABLE_KEY=' .env | cut -d= -f2-)
+
+docker build \
+  --build-arg VITE_CLERK_PUBLISHABLE_KEY="$VITE_CLERK_PUBLISHABLE_KEY" \
+  -t fitadaptai:v1.0-aws .
+```
+
+**4. Ejecutar el contenedor.** El puerto 80 del host se publica sobre el 8000 interno; los secretos se inyectan en tiempo de ejecución:
+
+```bash
+docker run -d \
+  --name fitadaptai \
+  --restart unless-stopped \
+  -p 80:8000 \
+  --env-file .env \
+  fitadaptai:v1.0-aws
+```
+
+**5. Comprobar el arranque:**
+
+```bash
+docker ps
+docker logs --tail 50 fitadaptai
+```
+
+> **Nota:** `--env-file` se lee al **crear** el contenedor. Si se modifica `.env`, hay que recrearlo (`docker rm -f fitadaptai` y volver a ejecutar `docker run`); `docker restart` conserva las variables antiguas. La variable `VITE_CLERK_PUBLISHABLE_KEY` se embebe en el build, por lo que cambiarla exige reconstruir la imagen.
+
+### 9.7. Verificación del despliegue
+
+Comprobaciones desde la instancia:
+
+```bash
+curl -i http://localhost/api/health
+curl -i http://localhost/api/me
+```
+
+Y desde el equipo local:
+
+```bash
+curl -i http://IP_PUBLICA/api/health
+```
+
+| Prueba | Comando / acción | Resultado esperado | Resultado |
+| :--- | :--- | :--- | :--- |
+| Salud pública | `curl -i http://IP_PUBLICA/api/health` | `200` + `{"status":"ok",...,"modo":"ia"}` | ⬜ Pendiente de ejecución en AWS |
+| Ruta protegida sin token | `curl -i http://IP_PUBLICA/api/me` | `401` + `"No autorizado. Inicia sesión con Clerk."` | ⬜ Pendiente |
+| SPA | Abrir `http://IP_PUBLICA` | Pantalla de inicio de sesión de Clerk | ⬜ Pendiente |
+| Login | Email/Google | Acceso al formulario | ⬜ Pendiente |
+| Generación de rutina | Completar formulario y enviar | Rutina renderizada en menos de 55 s | ⬜ Pendiente |
+| Token válido | Consola del navegador: `copy(await window.Clerk.session.getToken())` y `curl -H "Authorization: Bearer <JWT>" .../api/me` | `200` + `user_id` | ⬜ Pendiente |
+| Persistencia | `docker ps` | Contenedor `Up` con `0.0.0.0:80->8000/tcp` | ⬜ Pendiente |
+
+> Las URLs de los servicios deben ser accesibles desde Internet. Si `curl` desde fuera falla pero `localhost` responde, revisar el Security Group y que la instancia tenga IP pública.
+
+### 9.8. Operación y ciclo de vida en el laboratorio
+
+| Situación | Acción |
+| :--- | :--- |
+| Fin de la práctica | Detener la instancia desde la consola de EC2 (`Instance state → Stop`) para no consumir presupuesto. |
+| Reinicio de la instancia | La **IP pública cambia** (salvo Elastic IP); actualizar la URL y volver a verificar `/api/health`. El contenedor arranca solo gracias a `--restart unless-stopped` y a Docker habilitado en el arranque. |
+| Fin de la sesión del laboratorio (≈4 h) | Las credenciales temporales dejan de ser válidas. La instancia y su volumen EBS pueden seguir existiendo: detenerla explícitamente. |
+| Reinicio del laboratorio por el profesor | Se pierden los recursos. Recrear la instancia siguiendo las secciones 9.4–9.6 (el repositorio y el `.env` local permiten reconstruirlo). |
+| Actualizar la aplicación | `git fetch --tags && git checkout <tag>`, reconstruir la imagen, `docker rm -f fitadaptai` y volver a ejecutar `docker run`. |
+| Cambiar variables de entorno | Editar `.env`, `chmod 600` y **recrear** el contenedor. |
+| Cambiar la clave publicable de Clerk | Reconstruir la imagen con el nuevo `--build-arg` y recrear el contenedor. |
+| Revisar logs | `docker logs --tail 100 -f fitadaptai`. |
+| Fallback si el puerto 80 no está permitido | Publicar con `-p 8000:8000`, abrir el 8000 en el Security Group y acceder con `http://IP_PUBLICA:8000`. |
+
+Opcionalmente, una **Elastic IP** evita el cambio de dirección al reiniciar, pero puede consumir presupuesto cuando la instancia está detenida; para esta práctica no es necesaria.
+
+### 9.9. Diagnóstico de problemas
+
+| Síntoma | Causa probable | Solución |
+| :--- | :--- | :--- |
+| `docker build` se queda sin memoria o el proceso muere | `t3.micro` con 1 GiB durante `npm ci` + `vue-tsc` | Usar `t3.small` o añadir 2 GiB de swap. |
+| Falla `npm ci` en la instancia | `package-lock.json` desincronizado | Desplegar desde un commit con el lock corregido (`npm ci --dry-run` en local). |
+| `curl` desde fuera no conecta | Security Group sin la regla 80 o instancia sin IP pública | Revisar reglas de entrada y `Auto-assign public IP`. |
+| `502` / conexión rechazada en `/api/*` | Contenedor detenido o caído | `docker ps`, `docker logs fitadaptai`, revisar `docker run`. |
+| `500` «La clave de la API de Groq no está configurada» | `.env` ausente o mal montado | Verificar `--env-file .env` y recrear el contenedor. |
+| `401` «Falta configuración de Clerk en el servidor» | `CLERK_SECRET_KEY` ausente en `.env` | Añadir la variable y recrear el contenedor. |
+| `401` «No se pudo validar la sesión con Clerk» | Sin salida a `api.clerk.com` | Comprobar conectividad saliente de la instancia. |
+| La web no carga tras reiniciar la instancia | IP pública nueva | Usar la IP actual o asociar una Elastic IP. |
+| Error de CSP en el navegador | En EC2 no se aplica `vercel.json`; no debería ocurrir | Revisar la consola; si se añade un proxy inverso, replicar las cabeceras de seguridad. |
+
+### 9.10. Costes y buenas prácticas
+
+* `t3.small` cuesta aproximadamente **0,021 USD/h** y 16 GiB gp3 alrededor de **1,3 USD/mes** (tarifas orientativas de `us-east-1`); el gasto se descuenta del presupuesto del laboratorio.
+* Detener la instancia al terminar cada sesión; el volumen EBS sigue generando un coste mínimo, pero conserva la instalación para la siguiente práctica.
+* No subir `.env` al repositorio ni copiarlo dentro de la imagen.
+* Mantener el usuario `appuser` sin privilegios dentro del contenedor (ya definido en el `Dockerfile`).
+* Etiquetar el commit desplegado (`v1.0-aws`) para poder reconstruir exactamente la misma versión.
 
 ## 10. Operación, Verificación y Tests
 
@@ -406,6 +641,7 @@ Para evitar consumir la cuota (tokens) de OpenAI/Groq durante el desarrollo de l
 
 ## 12. Historial de Versiones (Git y Evidencias)
 
+* `v1.0-aws`: Despliegue en una instancia EC2 del AWS Academy Learner Lab mediante un único contenedor Docker, con publicación en el puerto 80, secretos inyectados en ejecución y runbook reproducible documentado en la sección 9. Imagen y endpoints verificados en local antes del despliegue.
 * `v0.5-docker`: Aplicación completa contenerizada en una única imagen Docker multi-etapa (Vue 3 compilado + FastAPI sirviendo estáticos y API protegida con Clerk), verificada localmente.
 * `v0.4-clerk`: Autenticación con Clerk operativa en producción. Dependencia `@clerk/vue` registrada, CSP adaptada a Clerk (SDK, login con Google y protección anti-bots) y verificación criptográfica de la firma JWT en el backend con `PyJWT`.
 * `v0.3.0` / `v0.3-vercel`: Despliegue *full-stack serverless* completado en Vercel (Fase 3). SPA Vue 3 y FastAPI unificados en un único proyecto, configuración de enrutamiento en `vercel.json`, variables de entorno protegidas y monitorización mediante Vercel CLI.
