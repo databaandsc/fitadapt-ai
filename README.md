@@ -470,9 +470,10 @@ docker logs --tail 50 fitadaptai
 
 ### 9.7. Verificación del despliegue
 
-Despliegue verificado el **7 de noviembre de 2026** sobre la IP pública `54.237.138.20` (la IP cambia si se detiene e inicia la instancia):
+Despliegue verificado el **7 de noviembre de 2026** en una instancia EC2 del Learner Lab.
 
-* **URL de la aplicación:** <http://54.237.138.20>
+> La **IP pública del laboratorio es efímera**: cambia cada vez que se detiene e inicia la instancia. Por ese motivo no se fija en esta documentación; se consulta en la consola de EC2 y se usa como `IP_PUBLICA` en los comandos siguientes.
+
 * **Imagen desplegada:** `fitadaptai:v1.0-aws`
 * **Contenedor:** `8fd1953e2d31` (`Up`, `0.0.0.0:80->8000/tcp`)
 
@@ -491,16 +492,16 @@ curl -i http://IP_PUBLICA/api/health
 
 | Prueba | Comando / acción | Resultado esperado | Resultado obtenido |
 | :--- | :--- | :--- | :--- |
-| Salud pública | `curl -i http://54.237.138.20/api/health` | `200` + `{"status":"ok",...,"modo":"ia"}` | ✅ `200` · `{"status":"ok","service":"FitAdaptAI API (Python/FastAPI)","modo":"ia"}` |
-| Ruta protegida sin token | `curl -i http://54.237.138.20/api/me` | `401` + `"No autorizado. Inicia sesión con Clerk."` | ✅ `401` · `"No autorizado. Inicia sesión con Clerk."` |
-| Token inventado | `curl -i -H "Authorization: Bearer a.eyJzdWIiOiJmYWtlIn0.b" http://54.237.138.20/api/me` | `401` | ✅ `401` · `"Sesión inválida o caducada."` |
-| SPA servida | `curl -i http://54.237.138.20/` | `200` + HTML de la SPA | ✅ `200 text/html` (485 bytes) |
-| Login | Navegador: email y Google | Acceso al formulario | ⬜ Pendiente de comprobar en navegador |
-| Generación de rutina | Completar formulario y enviar | Rutina renderizada en menos de 55 s | ⬜ Pendiente |
-| Token válido | Consola del navegador: `copy(await window.Clerk.session.getToken())` y `curl -H "Authorization: Bearer <JWT>" .../api/me` | `200` + `user_id` | ⬜ Pendiente |
+| Salud pública | `curl -i http://IP_PUBLICA/api/health` | `200` + `{"status":"ok",...,"modo":"ia"}` | ✅ `200` · `{"status":"ok","service":"FitAdaptAI API (Python/FastAPI)","modo":"ia"}` |
+| Ruta protegida sin token | `curl -i http://IP_PUBLICA/api/me` | `401` + `"No autorizado. Inicia sesión con Clerk."` | ✅ `401` · `"No autorizado. Inicia sesión con Clerk."` |
+| Token inventado | `curl -i -H "Authorization: Bearer a.eyJzdWIiOiJmYWtlIn0.b" http://IP_PUBLICA/api/me` | `401` | ✅ `401` · `"Sesión inválida o caducada."` |
+| SPA servida | `curl -i http://IP_PUBLICA/` | `200` + HTML de la SPA | ✅ `200 text/html` (485 bytes) |
+| Login | Navegador: pantalla de Clerk | Acceso al formulario | ✅ Pantalla de Clerk y acceso correctos |
+| Generación de rutina | Completar formulario y enviar | Rutina renderizada en menos de 55 s | ✅ Rutina generada y mostrada en la interfaz |
+| Token válido | Consola del navegador: `copy(await window.Clerk.session.getToken())` y `curl -H "Authorization: Bearer <JWT>" .../api/me` | `200` + `user_id` | ⬜ Comprobación opcional no realizada |
 | Persistencia | `docker ps` | Contenedor `Up` con `0.0.0.0:80->8000/tcp` | ✅ `8fd1953e2d31` · `fitadaptai:v1.0-aws` · `Up 7 minutes` |
 
-> Las URLs de los servicios deben ser accesibles desde Internet. Si `curl` desde fuera falla pero `localhost` responde, revisar el Security Group y que la instancia tenga IP pública.
+> El primer acceso puede tardar unos segundos mientras se descarga el SDK de Clerk y se inicializa la sesión; las cargas posteriores son inmediatas. Si `curl` desde fuera falla pero `localhost` responde, revisar el Security Group y que la instancia tenga IP pública. Las URLs de los servicios deben ser accesibles desde Internet.
 
 ### 9.8. Operación y ciclo de vida en el laboratorio
 
@@ -650,7 +651,7 @@ Para evitar consumir la cuota (tokens) de OpenAI/Groq durante el desarrollo de l
 
 ## 12. Historial de Versiones (Git y Evidencias)
 
-* `v1.0-aws`: Despliegue en una instancia EC2 del AWS Academy Learner Lab mediante un único contenedor Docker, con publicación en el puerto 80, secretos inyectados en ejecución y runbook reproducible documentado en la sección 9. Desplegado en `http://54.237.138.20` y verificado externamente: health `200`, SPA `200`, `401` sin token y `401` con token inválido; contenedor `fitadaptai:v1.0-aws` en estado `Up`.
+* `v1.0-aws`: Despliegue en una instancia EC2 del AWS Academy Learner Lab mediante un único contenedor Docker, con publicación en el puerto 80, secretos inyectados en ejecución y runbook reproducible documentado en la sección 9. Desplegado en una instancia EC2 del laboratorio (IP pública efímera, no fijada en la documentación) y verificado: health `200`, SPA `200`, `401` sin token y con token inválido, login de Clerk y generación de rutina correctos; contenedor `fitadaptai:v1.0-aws` en estado `Up`.
 * `v0.5-docker`: Aplicación completa contenerizada en una única imagen Docker multi-etapa (Vue 3 compilado + FastAPI sirviendo estáticos y API protegida con Clerk), verificada localmente.
 * `v0.4-clerk`: Autenticación con Clerk operativa en producción. Dependencia `@clerk/vue` registrada, CSP adaptada a Clerk (SDK, login con Google y protección anti-bots) y verificación criptográfica de la firma JWT en el backend con `PyJWT`.
 * `v0.3.0` / `v0.3-vercel`: Despliegue *full-stack serverless* completado en Vercel (Fase 3). SPA Vue 3 y FastAPI unificados en un único proyecto, configuración de enrutamiento en `vercel.json`, variables de entorno protegidas y monitorización mediante Vercel CLI.
